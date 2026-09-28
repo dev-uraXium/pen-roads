@@ -1,0 +1,6 @@
+{
+  "name": "Open Roads: All Seasons",
+  "description": "A 3D open-world driving sandbox set in coastal mountain Northbridge with passenger rides, bus routes, cargo deliveries, dynamic weather, and multi-vehicle garage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
