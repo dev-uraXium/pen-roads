@@ -308,7 +308,7 @@ export class ProceduralRouteStreamer {
     const centerPos = new THREE.Vector3(midPoint.x, midPoint.y, midPoint.z);
 
     // ==========================================
-    // 1. ROAD SURFACE & PAINTED MARKINGS MESH
+    // 1. ROAD SURFACE & EXTRUDED DECK SKIRTS
     // ==========================================
     const roadGeo = new THREE.BufferGeometry();
     const roadVerts: number[] = [];
@@ -316,32 +316,48 @@ export class ProceduralRouteStreamer {
     const roadIndices: number[] = [];
 
     const halfW = this.roadWidth * 0.5;
+    const skirtDepth = 0.8;
 
     for (let i = 0; i <= steps; i++) {
       const p = points[i];
       const norm = p.normal;
       const bank = p.banking;
 
-      // Left edge of road
+      // Left and right surface edge
       const lx = p.x - norm.x * halfW;
       const lz = p.z - norm.z * halfW;
       const ly = p.y - halfW * Math.tan(bank);
 
-      // Right edge of road
       const rx = p.x + norm.x * halfW;
       const rz = p.z + norm.z * halfW;
       const ry = p.y + halfW * Math.tan(bank);
 
+      // 4 vertices per slice: [0: TopLeft, 1: TopRight, 2: SkirtLeft, 3: SkirtRight]
       roadVerts.push(lx, ly, lz);
       roadVerts.push(rx, ry, rz);
+      roadVerts.push(lx, ly - skirtDepth, lz);
+      roadVerts.push(rx, ry - skirtDepth, rz);
 
       roadNorms.push(0, 1, 0);
       roadNorms.push(0, 1, 0);
+      roadNorms.push(-norm.x, 0, -norm.z);
+      roadNorms.push(norm.x, 0, norm.z);
 
       if (i < steps) {
-        const row = i * 2;
-        roadIndices.push(row, row + 1, row + 2);
-        roadIndices.push(row + 1, row + 3, row + 2);
+        const row = i * 4;
+        const next = (i + 1) * 4;
+
+        // Top road surface quad
+        roadIndices.push(row, row + 1, next);
+        roadIndices.push(row + 1, next + 1, next);
+
+        // Left side skirt quad
+        roadIndices.push(row + 2, row, next + 2);
+        roadIndices.push(row, next, next + 2);
+
+        // Right side skirt quad
+        roadIndices.push(row + 1, row + 3, next + 1);
+        roadIndices.push(row + 3, next + 3, next + 1);
       }
     }
 
@@ -363,11 +379,13 @@ export class ProceduralRouteStreamer {
     for (let i = 0; i <= steps; i++) {
       const p = points[i];
       const norm = p.normal;
-      centerVerts.push(p.x - norm.x * (cWidth * 0.5), p.y + 0.02, p.z - norm.z * (cWidth * 0.5));
-      centerVerts.push(p.x + norm.x * (cWidth * 0.5), p.y + 0.02, p.z + norm.z * (cWidth * 0.5));
+      const bank = p.banking;
+      const centerY = p.y + 0.02;
+
+      centerVerts.push(p.x - norm.x * (cWidth * 0.5), centerY - (cWidth * 0.5) * Math.tan(bank), p.z - norm.z * (cWidth * 0.5));
+      centerVerts.push(p.x + norm.x * (cWidth * 0.5), centerY + (cWidth * 0.5) * Math.tan(bank), p.z + norm.z * (cWidth * 0.5));
 
       if (i < steps && (idx * steps + i) % 2 === 0) {
-        // dashed effect: alternate segments
         const row = i * 2;
         centerIndices.push(row, row + 1, row + 2);
         centerIndices.push(row + 1, row + 3, row + 2);
@@ -389,9 +407,10 @@ export class ProceduralRouteStreamer {
       for (let i = 0; i <= steps; i++) {
         const p = points[i];
         const norm = p.normal;
+        const bank = p.banking;
         const cx = p.x + norm.x * (side * eOffset);
         const cz = p.z + norm.z * (side * eOffset);
-        const cy = p.y + 0.02;
+        const cy = p.y + (side * eOffset) * Math.tan(bank) + 0.02;
 
         edgeVerts.push(cx - norm.x * (eW * 0.5), cy, cz - norm.z * (eW * 0.5));
         edgeVerts.push(cx + norm.x * (eW * 0.5), cy, cz + norm.z * (eW * 0.5));
@@ -409,7 +428,7 @@ export class ProceduralRouteStreamer {
     });
 
     // ==========================================
-    // 3. ROAD SHOULDERS (Gravel / Packed Earth)
+    // 3. ROAD SHOULDERS (Gravel / Packed Earth with Skirts)
     // ==========================================
     const shoulderGeo = new THREE.BufferGeometry();
     const sVerts: number[] = [];
@@ -418,36 +437,53 @@ export class ProceduralRouteStreamer {
     for (let i = 0; i <= steps; i++) {
       const p = points[i];
       const norm = p.normal;
+      const bank = p.banking;
 
-      // Left shoulder
+      // Left road edge & outer shoulder
       const lInnerX = p.x - norm.x * halfW;
       const lInnerZ = p.z - norm.z * halfW;
-      const lInnerY = p.y;
+      const lInnerY = p.y - halfW * Math.tan(bank);
+
       const lOuterX = p.x - norm.x * (halfW + this.shoulderWidth);
       const lOuterZ = p.z - norm.z * (halfW + this.shoulderWidth);
-      const lOuterY = p.y - 0.12;
+      const lOuterY = lInnerY - 0.08;
 
-      // Right shoulder
+      // Right road edge & outer shoulder
       const rInnerX = p.x + norm.x * halfW;
       const rInnerZ = p.z + norm.z * halfW;
-      const rInnerY = p.y;
+      const rInnerY = p.y + halfW * Math.tan(bank);
+
       const rOuterX = p.x + norm.x * (halfW + this.shoulderWidth);
       const rOuterZ = p.z + norm.z * (halfW + this.shoulderWidth);
-      const rOuterY = p.y - 0.12;
+      const rOuterY = rInnerY - 0.08;
 
+      // 6 vertices per slice: [0: lOuter, 1: lInner, 2: rInner, 3: rOuter, 4: lSkirt, 5: rSkirt]
       sVerts.push(lOuterX, lOuterY, lOuterZ);
       sVerts.push(lInnerX, lInnerY, lInnerZ);
       sVerts.push(rInnerX, rInnerY, rInnerZ);
       sVerts.push(rOuterX, rOuterY, rOuterZ);
+      sVerts.push(lOuterX, lOuterY - 1.2, lOuterZ);
+      sVerts.push(rOuterX, rOuterY - 1.2, rOuterZ);
 
       if (i < steps) {
-        const row = i * 4;
+        const row = i * 6;
+        const next = (i + 1) * 6;
+
         // Left shoulder quad
-        sIndices.push(row, row + 1, row + 4);
-        sIndices.push(row + 1, row + 5, row + 4);
+        sIndices.push(row, row + 1, next);
+        sIndices.push(row + 1, next + 1, next);
+
         // Right shoulder quad
-        sIndices.push(row + 2, row + 3, row + 6);
-        sIndices.push(row + 3, row + 7, row + 6);
+        sIndices.push(row + 2, row + 3, next + 2);
+        sIndices.push(row + 3, next + 3, next + 2);
+
+        // Left outer skirt
+        sIndices.push(row + 4, row, next + 4);
+        sIndices.push(row, next, next + 4);
+
+        // Right outer skirt
+        sIndices.push(row + 3, row + 5, next + 3);
+        sIndices.push(row + 5, next + 5, next + 3);
       }
     }
     shoulderGeo.setAttribute('position', new THREE.Float32BufferAttribute(sVerts, 3));
@@ -458,56 +494,65 @@ export class ProceduralRouteStreamer {
     group.add(shoulderMesh);
 
     // ==========================================
-    // 4. PROCEDURAL FLANKING TERRAIN
+    // 4. PROCEDURAL FLANKING TERRAIN (Seamless + Skirts)
     // ==========================================
     const terrainGeo = new THREE.BufferGeometry();
     const tVerts: number[] = [];
     const tIndices: number[] = [];
 
-    const terrainSlices = 4; // grid divisions away from road
+    const terrainSlices = 4;
     const sliceWidth = this.terrainMargin / terrainSlices;
 
     for (let i = 0; i <= steps; i++) {
       const p = points[i];
       const norm = p.normal;
+      const bank = p.banking;
       const rowStart = tVerts.length / 3;
 
-      // Build vertices from far left (-margin) to left shoulder
+      const lShoulderY = p.y - halfW * Math.tan(bank) - 0.08;
+      const rShoulderY = p.y + halfW * Math.tan(bank) - 0.08;
+
+      // Left Flank (from far left to shoulder)
       for (let s = terrainSlices; s >= 0; s--) {
         const distFromRoad = halfW + this.shoulderWidth + s * sliceWidth;
         const tx = p.x - norm.x * distFromRoad;
         const tz = p.z - norm.z * distFromRoad;
 
-        // Terrain elevation shaping
-        let ty = p.y;
-        if (this.biome === 'alpine_pass') {
-          // Steep alpine crags rising on one side, falling on other
-          ty = p.y + Math.sin(tx * 0.05 + tz * 0.04) * 8 + (s / terrainSlices) * 22;
-        } else if (this.biome === 'coastal_highway') {
-          // Left side: coastal cliffs / hills
-          ty = p.y + (s / terrainSlices) * 12 + Math.sin(tx * 0.08) * 3;
-        } else {
-          // Green valley rolling knolls
-          ty = p.y + Math.sin(tx * 0.04 + tz * 0.03) * 4 + (s / terrainSlices) * 6;
+        let ty = lShoulderY;
+        if (s > 0) {
+          const sRatio = s / terrainSlices;
+          if (this.biome === 'alpine_pass') {
+            const crags = Math.sin(tx * 0.05 + tz * 0.04) * 7 + Math.cos(tx * 0.02 + tz * 0.03) * 4;
+            ty = p.y + crags + sRatio * 22;
+          } else if (this.biome === 'coastal_highway') {
+            ty = p.y + sRatio * 14 + Math.sin(tx * 0.08) * 3;
+          } else {
+            const knolls = Math.sin(tx * 0.04 + tz * 0.03) * 4;
+            ty = p.y + knolls + sRatio * 6;
+          }
         }
 
         tVerts.push(tx, ty, tz);
       }
 
-      // Build vertices from right shoulder to far right (+margin)
+      // Right Flank (from shoulder to far right)
       for (let s = 0; s <= terrainSlices; s++) {
         const distFromRoad = halfW + this.shoulderWidth + s * sliceWidth;
         const tx = p.x + norm.x * distFromRoad;
         const tz = p.z + norm.z * distFromRoad;
 
-        let ty = p.y;
-        if (this.biome === 'coastal_highway') {
-          // Right side: drops toward ocean beach / sea level
-          ty = Math.max(-2.5, p.y - (s / terrainSlices) * (p.y + 2.5));
-        } else if (this.biome === 'alpine_pass') {
-          ty = p.y + Math.cos(tx * 0.06 + tz * 0.05) * 6 + (s / terrainSlices) * 18;
-        } else {
-          ty = p.y + Math.cos(tx * 0.04 + tz * 0.03) * 4 + (s / terrainSlices) * 5;
+        let ty = rShoulderY;
+        if (s > 0) {
+          const sRatio = s / terrainSlices;
+          if (this.biome === 'coastal_highway') {
+            ty = Math.max(-2.5, p.y - sRatio * (p.y + 2.5));
+          } else if (this.biome === 'alpine_pass') {
+            const crags = Math.cos(tx * 0.06 + tz * 0.05) * 6 + Math.sin(tx * 0.03 - tz * 0.02) * 3;
+            ty = p.y + crags + sRatio * 18;
+          } else {
+            const knolls = Math.cos(tx * 0.04 + tz * 0.03) * 4;
+            ty = p.y + knolls + sRatio * 5;
+          }
         }
 
         tVerts.push(tx, ty, tz);
@@ -516,7 +561,7 @@ export class ProceduralRouteStreamer {
       if (i < steps) {
         const totalCols = (terrainSlices + 1) * 2;
         for (let c = 0; c < totalCols - 1; c++) {
-          if (c === terrainSlices) continue; // gap over road surface
+          if (c === terrainSlices) continue; // skip road gap
           const p1 = rowStart + c;
           const p2 = rowStart + c + 1;
           const p3 = rowStart + totalCols + c;
@@ -1112,6 +1157,21 @@ export class ProceduralRouteStreamer {
       position: new THREE.Vector3(posX, posY, posZ),
       heading,
     };
+  }
+
+  /**
+   * Returns all active collidable meshes (road deck, shoulders, terrain) for raycasting
+   */
+  public getTerrainColliders(): THREE.Object3D[] {
+    const colliders: THREE.Object3D[] = [];
+    this.activeSegments.forEach((seg) => {
+      seg.group.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          colliders.push(child);
+        }
+      });
+    });
+    return colliders;
   }
 
   public dispose(): void {

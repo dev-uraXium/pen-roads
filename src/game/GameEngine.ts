@@ -5,7 +5,7 @@ import { JobSystem } from './jobs/JobSystem';
 import { ProceduralRouteStreamer } from './procedural/ProceduralRouteStreamer';
 import { VEHICLE_CONFIGS } from './vehicle/VehicleConfigs';
 import { VehicleMeshRig, VehicleModelBuilder } from './vehicle/VehicleModelBuilder';
-import { VehicleInput, VehiclePhysics } from './vehicle/VehiclePhysics';
+import { CollisionBox, VehicleInput, VehiclePhysics } from './vehicle/VehiclePhysics';
 import { BuiltWorld, CityBuilder } from './world/CityBuilder';
 import { TrafficSystem } from './world/TrafficSystem';
 import { WeatherController } from './world/WeatherController';
@@ -164,6 +164,8 @@ export class GameEngine {
         this.routeStreamer = null;
       }
 
+      this.trafficSys.setMode(false);
+
       if (this.vehiclePhysics) {
         this.vehiclePhysics.setElevationSampler((x, z) => getWorldElevation(x, z));
         this.vehiclePhysics.setCollisionBoxes(this.builtWorld.collisionBoxes);
@@ -176,6 +178,7 @@ export class GameEngine {
     }
 
     this.isEndlessMode = true;
+    this.trafficSys.setMode(true);
 
     if (this.builtWorld) {
       this.builtWorld.root.visible = false;
@@ -470,9 +473,15 @@ export class GameEngine {
 
     if (this.vehiclePhysics && this.vehicleRig) {
       // Stream procedural route segments ahead and recycle behind
+      let baseBoxes: CollisionBox[] = [];
+      let activeColliders: THREE.Object3D[] = [];
+
       if (this.isEndlessMode && this.routeStreamer) {
-        const streamBoxes = this.routeStreamer.update(this.vehiclePhysics.position);
-        this.vehiclePhysics.setCollisionBoxes(streamBoxes);
+        baseBoxes = this.routeStreamer.update(this.vehiclePhysics.position);
+        activeColliders = this.routeStreamer.getTerrainColliders();
+      } else if (this.builtWorld) {
+        baseBoxes = this.builtWorld.collisionBoxes;
+        activeColliders = [this.builtWorld.root];
       }
 
       // Sync passenger state
@@ -494,8 +503,19 @@ export class GameEngine {
       // Weather & Sky updates
       this.weatherCtrl.update(delta, this.camera.position, this.vehiclePhysics.position);
 
-      // Traffic AI updates
-      this.trafficSys.update(delta, this.vehiclePhysics.position, this.headlightsOn);
+      // Traffic AI updates with real raycast terrain height
+      this.trafficSys.update(
+        delta,
+        this.vehiclePhysics.position,
+        this.headlightsOn,
+        this.isEndlessMode,
+        this.routeStreamer,
+        activeColliders
+      );
+
+      // Combine world/streamer collision boxes with moving traffic boxes
+      const trafficBoxes = this.trafficSys.getCollisionBoxes();
+      this.vehiclePhysics.setCollisionBoxes([...baseBoxes, ...trafficBoxes]);
 
       // Beacon & Objective update
       this.updateObjectiveZone(delta);
